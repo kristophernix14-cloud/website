@@ -1,0 +1,3722 @@
+<?php
+/**
+ * Copy this file to payment-secrets.php and add your Stripe secret key.
+ * Never commit payment-secrets.php to a public repository.
+ */
+return [
+    'stripe_secret_key' => 'sk_test_YOUR_STRIPE_SECRET_KEY',
+];
+<?php
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Method not allowed']);
+    exit;
+}
+
+$secretsFile = __DIR__ . '/payment-secrets.php';
+if (!file_exists($secretsFile)) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Stripe is not configured. Copy api/payment-secrets.example.php to api/payment-secrets.php and add your secret key.']);
+    exit;
+}
+
+$secrets = require $secretsFile;
+$stripeSecret = $secrets['stripe_secret_key'] ?? '';
+
+if (!$stripeSecret || strpos($stripeSecret, 'YOUR_STRIPE') !== false) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Stripe secret key is missing. Update api/payment-secrets.php.']);
+    exit;
+}
+
+$payload = json_decode(file_get_contents('php://input'), true);
+if (!$payload) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid request body']);
+    exit;
+}
+
+$items = $payload['items'] ?? [];
+$customer = $payload['customer'] ?? [];
+$shipping = floatval($payload['shipping'] ?? 0);
+$orderId = $payload['orderId'] ?? ('EP-' . time());
+
+if (empty($items)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Cart is empty']);
+    exit;
+}
+
+$lineItems = [];
+$subtotal = 0;
+
+foreach ($items as $item) {
+    $qty = max(1, intval($item['quantity'] ?? 1));
+    $price = floatval($item['price'] ?? 0);
+    if ($price <= 0) {
+        http_response_code(400);
+        echo json_encode(['error' => 'One or more items are missing a price. Update js/prices.js.']);
+        exit;
+    }
+    $subtotal += $price * $qty;
+    $lineItems[] = [
+        'price_data' => [
+            'currency' => 'usd',
+            'product_data' => [
+                'name' => $item['display'] ?? ($item['name'] ?? 'Research peptide'),
+            ],
+            'unit_amount' => intval(round($price * 100)),
+        ],
+        'quantity' => $qty,
+    ];
+}
+
+if ($shipping > 0) {
+    $lineItems[] = [
+        'price_data' => [
+            'currency' => 'usd',
+            'product_data' => ['name' => 'Shipping'],
+            'unit_amount' => intval(round($shipping * 100)),
+        ],
+        'quantity' => 1,
+    ];
+}
+
+$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+$base = $scheme . '://' . $host;
+
+$sessionData = [
+    'mode' => 'payment',
+    'success_url' => $base . '/checkout-success.html?order=' . urlencode($orderId) . '&session_id={CHECKOUT_SESSION_ID}',
+    'cancel_url' => $base . '/checkout.html?cancelled=1',
+    'line_items' => $lineItems,
+    'metadata' => [
+        'order_id' => $orderId,
+        'customer_email' => $customer['email'] ?? '',
+    ],
+];
+
+if (!empty($customer['email'])) {
+    $sessionData['customer_email'] = $customer['email'];
+}
+
+$ch = curl_init('https://api.stripe.com/v1/checkout/sessions');
+curl_setopt_array($ch, [
+    CURLOPT_POST => true,
+    CURLOPT_USERPWD => $stripeSecret . ':',
+    CURLOPT_POSTFIELDS => http_build_query(flattenStripeParams($sessionData)),
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT => 30,
+]);
+
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+$result = json_decode($response, true);
+
+if ($httpCode >= 400 || empty($result['url'])) {
+    http_response_code(500);
+    echo json_encode([
+        'error' => $result['error']['message'] ?? 'Unable to create Stripe checkout session',
+    ]);
+    exit;
+}
+
+echo json_encode(['url' => $result['url']]);
+
+function flattenStripeParams($params, $prefix = '')
+{
+    $result = [];
+    foreach ($params as $key => $value) {
+        $k = $prefix === '' ? $key : $prefix . '[' . $key . ']';
+        if (is_array($value)) {
+            $result = array_merge($result, flattenStripeParams($value, $k));
+        } else {
+            $result[$k] = $value;
+        }
+    }
+    return $result;
+}
+/* ===== Variables — White, Black & Gold ===== */
+:root {
+  --bg-deep: #e8e8e8;
+  --bg-card: #ffffff;
+  --bg-elevated: #f2f2f2;
+  --text-primary: #0a0a0a;
+  --text-secondary: #3d3d3d;
+  --text-muted: #6b6b6b;
+  --text-on-accent: #0a0a0a;
+  --gold: #c9a227;
+  --gold-light: #e2c04a;
+  --gold-dark: #8b6914;
+  --accent-cyan: var(--gold);
+  --accent-violet: var(--gold-dark);
+  --accent-magenta: var(--gold-light);
+  --gradient-main: linear-gradient(135deg, #d4af37, #8b6914);
+  --gradient-warm: linear-gradient(135deg, #e8c84a, #c9a227);
+  --border-subtle: rgba(0, 0, 0, 0.1);
+  --border-glow: rgba(201, 162, 39, 0.45);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --shadow-glow: 0 4px 32px rgba(201, 162, 39, 0.15);
+  --font-display: 'Syne', sans-serif;
+  --font-body: 'Outfit', sans-serif;
+  --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== Reset ===== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+body.gate-active {
+  overflow: hidden;
+}
+
+img, svg {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul {
+  list-style: none;
+}
+
+button, input, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.container {
+  width: min(1140px, 92vw);
+  margin-inline: auto;
+}
+
+/* ===== Site & Peptide Artwork ===== */
+.site-content {
+  position: relative;
+}
+
+.site-content > header,
+.site-content > main,
+.site-content > footer {
+  position: relative;
+  z-index: 1;
+}
+
+.peptide-artwork {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.art-lab-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.art-hex-mesh {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100' viewBox='0 0 56 100'%3E%3Cpath d='M28 2 L52 16 V44 L28 58 L4 44 V16 Z' fill='none' stroke='%23c9a227' stroke-width='0.75' opacity='0.35'/%3E%3Cpath d='M28 42 L52 56 V84 L28 98 L4 84 V56 Z' fill='none' stroke='%23c9a227' stroke-width='0.75' opacity='0.35'/%3E%3C/svg%3E");
+  background-size: 56px 100px;
+  opacity: 0.22;
+}
+
+.art-hplc,
+.art-sequence,
+.art-deco,
+.art-helix-band {
+  position: absolute;
+  color: var(--gold-dark);
+}
+
+.art-hplc {
+  width: 100%;
+  height: 72px;
+  left: 0;
+  opacity: 0.2;
+}
+
+.art-hplc--upper {
+  top: 12%;
+}
+
+.art-hplc--lower {
+  bottom: 18%;
+  opacity: 0.16;
+}
+
+.art-sequence {
+  width: min(900px, 92vw);
+  height: 48px;
+  left: 50%;
+  top: 38%;
+  transform: translateX(-50%) rotate(-2deg);
+  opacity: 0.18;
+}
+
+.art-deco {
+  width: 200px;
+  height: 200px;
+  opacity: 0.14;
+}
+
+.art-deco--tl {
+  top: 0;
+  left: 0;
+}
+
+.art-deco--br {
+  bottom: 0;
+  right: 0;
+}
+
+.art-helix-band {
+  width: 200px;
+  height: 70vh;
+  right: 4%;
+  top: 15%;
+  opacity: 0.12;
+}
+
+.amino-chains {
+  position: absolute;
+  inset: 0;
+}
+
+.amino-chain {
+  position: absolute;
+  color: var(--gold-dark);
+  opacity: 0.2;
+  will-change: transform;
+}
+
+.amino-chain--1 {
+  width: 220px;
+  top: 20%;
+  left: 6%;
+  animation: chain-drift-a 16s ease-in-out infinite;
+}
+
+.amino-chain--2 {
+  width: 48px;
+  height: 200px;
+  top: 32%;
+  left: 2%;
+  animation: chain-drift-b 20s ease-in-out infinite;
+}
+
+.amino-chain--3 {
+  width: 170px;
+  top: 48%;
+  right: 8%;
+  transform: rotate(-8deg);
+  animation: chain-drift-c 18s ease-in-out infinite;
+}
+
+.amino-chain--4 {
+  width: 150px;
+  top: 8%;
+  right: 18%;
+  transform: rotate(6deg);
+  opacity: 0.17;
+  animation: chain-drift-d 14s ease-in-out infinite;
+}
+
+.amino-chain--5 {
+  width: 48px;
+  height: 155px;
+  top: 58%;
+  left: 10%;
+  animation: chain-drift-e 22s ease-in-out infinite;
+}
+
+.amino-chain--6 {
+  width: 185px;
+  top: 72%;
+  left: 22%;
+  transform: rotate(4deg);
+  animation: chain-drift-f 17s ease-in-out infinite;
+}
+
+.amino-chain--7 {
+  width: 110px;
+  top: 42%;
+  left: 42%;
+  transform: rotate(-12deg);
+  opacity: 0.15;
+  animation: chain-drift-g 19s ease-in-out infinite;
+}
+
+.amino-chain--8 {
+  width: 48px;
+  height: 135px;
+  top: 68%;
+  right: 14%;
+  animation: chain-drift-h 15s ease-in-out infinite;
+}
+
+@keyframes chain-drift-a {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50% { transform: translate(14px, -20px) rotate(3deg); }
+}
+
+@keyframes chain-drift-b {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(10px, 18px); }
+}
+
+@keyframes chain-drift-c {
+  0%, 100% { transform: translate(0, 0) rotate(-8deg); }
+  50% { transform: translate(-16px, 12px) rotate(-5deg); }
+}
+
+@keyframes chain-drift-d {
+  0%, 100% { transform: translate(0, 0) rotate(6deg); }
+  50% { transform: translate(-12px, 16px) rotate(9deg); }
+}
+
+@keyframes chain-drift-e {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-8px, -14px); }
+}
+
+@keyframes chain-drift-f {
+  0%, 100% { transform: translate(0, 0) rotate(4deg); }
+  50% { transform: translate(18px, -10px) rotate(1deg); }
+}
+
+@keyframes chain-drift-g {
+  0%, 100% { transform: translate(0, 0) rotate(-12deg); }
+  50% { transform: translate(12px, 14px) rotate(-8deg); }
+}
+
+@keyframes chain-drift-h {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-14px, -12px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .amino-chain,
+  .dna-rotate {
+    animation: none;
+  }
+
+  .dna-rotate:not(.dna-rotate--static) {
+    transform: rotateY(35deg);
+  }
+}
+
+.section--art {
+  position: relative;
+  overflow: hidden;
+}
+
+.section--art::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--gold) 20%, var(--gold) 80%, transparent);
+  opacity: 0.35;
+}
+
+.section--art::after {
+  content: '';
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  bottom: 0;
+  height: 56px;
+  pointer-events: none;
+  opacity: 0.14;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 56' preserveAspectRatio='none'%3E%3Cpath d='M0 40 H30 L42 18 L54 40 H90 L104 28 L118 40 H155 L170 12 L185 40 H220 H260 L274 32 L288 40 H325 L340 22 L355 40 H400' fill='none' stroke='%238b6914' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+
+/* ===== Legal Pages ===== */
+.legal-page {
+  padding-top: 7rem;
+}
+
+.legal-document {
+  max-width: 820px;
+  margin-inline: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: clamp(2rem, 4vw, 3rem);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.05);
+}
+
+.legal-title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  font-weight: 800;
+  color: var(--gold-dark);
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid rgba(201, 162, 39, 0.35);
+}
+
+.legal-document h2 {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+}
+
+.legal-document .effective-date {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.legal-document p {
+  color: var(--text-secondary);
+  margin-bottom: 1.25rem;
+  line-height: 1.75;
+  font-size: 0.95rem;
+}
+
+.legal-document p strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.legal-document > p > strong:only-child,
+.legal-document p strong:first-child:last-child {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.legal-document ol,
+.legal-document ul {
+  margin: 1rem 0 1.5rem 1.25rem;
+  color: var(--text-secondary);
+}
+
+.legal-document li {
+  margin-bottom: 0.875rem;
+  line-height: 1.7;
+  font-size: 0.95rem;
+}
+
+.legal-document a {
+  color: var(--gold-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-document a:hover {
+  color: var(--gold);
+}
+
+/* ===== Gate Overlay ===== */
+.gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.gate-overlay.dismissed {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
+.gate-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-deep);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(201, 162, 39, 0.1), transparent),
+    radial-gradient(ellipse 60% 50% at 80% 100%, rgba(0, 0, 0, 0.03), transparent);
+}
+
+.gate-card {
+  position: relative;
+  width: min(520px, 100%);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 2.5rem 2rem;
+  box-shadow: var(--shadow-glow), 0 24px 80px rgba(0, 0, 0, 0.12);
+  animation: gate-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes gate-enter {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+}
+
+.gate-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 1.25rem;
+  color: var(--accent-cyan);
+}
+
+.gate-title {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.75rem;
+}
+
+.gate-subtitle {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  margin-bottom: 2rem;
+  line-height: 1.7;
+}
+
+.gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gate-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.gate-checkbox:hover {
+  border-color: var(--border-glow);
+  background: #eeeeee;
+}
+
+.gate-checkbox input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.checkbox-custom {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--text-muted);
+  border-radius: 6px;
+  margin-top: 2px;
+  transition: all var(--transition);
+  position: relative;
+}
+
+.gate-checkbox input:checked + .checkbox-custom {
+  background: var(--gradient-main);
+  border-color: transparent;
+}
+
+.gate-checkbox input:checked + .checkbox-custom::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 2px;
+  width: 6px;
+  height: 11px;
+  border: solid var(--text-on-accent);
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+
+.gate-checkbox input:focus-visible + .checkbox-custom {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.checkbox-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.checkbox-label strong {
+  color: var(--text-primary);
+}
+
+.gate-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 1rem 1.5rem;
+  margin-top: 0.5rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--gradient-main);
+  color: var(--text-on-accent);
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: opacity var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.gate-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 32px rgba(201, 162, 39, 0.35);
+}
+
+.gate-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.gate-legal {
+  margin-top: 1.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.gate-legal a {
+  color: var(--gold-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ===== Header ===== */
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(232, 232, 232, 0.92);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 72px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.logo--image {
+  gap: 0;
+}
+
+.logo-img {
+  display: block;
+  height: 58px;
+  width: auto;
+  max-width: 320px;
+  object-fit: contain;
+  background: transparent;
+}
+
+.footer .logo-img {
+  height: 50px;
+  max-width: 280px;
+}
+
+.logo-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--gradient-main);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--text-on-accent);
+}
+
+.logo-text {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+.logo-accent {
+  background: var(--gradient-main);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+.nav-links a {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  transition: color var(--transition);
+}
+
+.nav-links a:hover {
+  color: var(--text-primary);
+}
+
+.nav-cta {
+  padding: 0.5rem 1.25rem !important;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary) !important;
+}
+
+.nav-cta:hover {
+  border-color: var(--border-glow) !important;
+}
+
+.cart-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.cart-btn:hover {
+  border-color: var(--border-glow);
+  background: rgba(201, 162, 39, 0.1);
+}
+
+.cart-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--gradient-main);
+  border-radius: 100px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-on-accent);
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.cart-count.visible {
+  display: flex;
+}
+
+.mobile-menu-btn {
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.mobile-menu-btn span {
+  display: block;
+  width: 24px;
+  height: 2px;
+  background: var(--text-primary);
+  border-radius: 2px;
+  transition: var(--transition);
+}
+
+/* ===== Hero ===== */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 8rem 0 4rem;
+  overflow: hidden;
+}
+
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(201, 162, 39, 0.06) 0%, transparent 30%),
+    linear-gradient(0deg, rgba(201, 162, 39, 0.05) 0%, transparent 25%);
+}
+
+.hero-inner {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-layout {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 3rem;
+  align-items: center;
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-visual {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: visible;
+}
+
+.hero-visual-panel {
+  width: 100%;
+  max-width: 380px;
+  min-height: 440px;
+  background: #0a0a0a;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.25),
+    inset 0 0 80px rgba(201, 162, 39, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 1200px;
+  perspective-origin: 50% 42%;
+  position: relative;
+  overflow: visible;
+}
+
+.hero-visual-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 65% 55% at 50% 48%, rgba(201, 162, 39, 0.14), transparent 70%);
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.dna-stage {
+  transform: rotateX(18deg);
+  transform-style: preserve-3d;
+}
+
+.dna-helix-3d {
+  width: 220px;
+  height: 360px;
+  position: relative;
+  transform-style: preserve-3d;
+}
+
+.dna-rotate {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  animation: dna-spin 8s linear infinite;
+  will-change: transform;
+}
+
+.dna-rotate--static {
+  animation: none;
+  transform: rotateY(40deg);
+}
+
+.dna-rung {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  width: var(--dna-diameter, 116px);
+  margin-left: calc(var(--dna-radius, 58px) * -1);
+  margin-top: -6px;
+  transform-style: preserve-3d;
+}
+
+.dna-node {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transform-style: preserve-3d;
+  box-shadow:
+    0 0 12px rgba(212, 175, 55, 0.6),
+    0 2px 4px rgba(0, 0, 0, 0.45),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.3),
+    inset 0 2px 3px rgba(255, 230, 140, 0.35);
+}
+
+.dna-node--a {
+  background: radial-gradient(circle at 32% 28%, #ffe88a, #d4af37 45%, #8b6914 100%);
+}
+
+.dna-node--b {
+  background: radial-gradient(circle at 32% 28%, #f5d76e, #b8941f 45%, #6b520f 100%);
+}
+
+.dna-bond {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #6b520f, #e2c04a 50%, #6b520f);
+  opacity: 0.9;
+  box-shadow: 0 0 8px rgba(201, 162, 39, 0.45);
+}
+
+.dna-link {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+
+.dna-link-rod {
+  display: block;
+  width: 2px;
+  height: var(--dna-step, 8px);
+  margin-left: -1px;
+  border-radius: 2px;
+  transform-origin: top center;
+}
+
+.dna-link--a .dna-link-rod {
+  background: linear-gradient(180deg, #d4af37, #8b6914);
+  box-shadow: 0 0 5px rgba(201, 162, 39, 0.45);
+}
+
+.dna-link--b .dna-link-rod {
+  background: linear-gradient(180deg, #e8c84a, #9a7b0a);
+  opacity: 0.85;
+  box-shadow: 0 0 5px rgba(201, 162, 39, 0.35);
+}
+
+.dna-floor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 160px;
+  height: 160px;
+  margin-left: -80px;
+  margin-top: 20px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(201, 162, 39, 0.18) 0%, transparent 70%);
+  transform: rotateX(90deg) translateZ(-20px);
+  opacity: 0.5;
+}
+
+@keyframes dna-spin {
+  from { transform: rotateY(0deg); }
+  to { transform: rotateY(360deg); }
+}
+
+.hero-badge {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  background: rgba(201, 162, 39, 0.1);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-radius: 100px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--gold-dark);
+  letter-spacing: 0.03em;
+  margin-bottom: 1.5rem;
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 1.25rem;
+  max-width: 640px;
+}
+
+.gradient-text {
+  background: var(--gradient-warm);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-desc {
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin-bottom: 2rem;
+  line-height: 1.7;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 3.5rem;
+}
+
+.hero-stats {
+  display: flex;
+  gap: 3rem;
+  flex-wrap: wrap;
+}
+
+.stat-value {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  background: var(--gradient-main);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hero-chromatogram {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12%;
+  height: 100px;
+  pointer-events: none;
+  color: var(--gold-dark);
+  opacity: 0.28;
+  z-index: 0;
+}
+
+.hero-chromatogram svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 1.75rem;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-primary {
+  background: var(--gradient-main);
+  color: var(--text-on-accent);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(201, 162, 39, 0.3);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.btn-ghost:hover {
+  border-color: var(--border-glow);
+  background: rgba(201, 162, 39, 0.06);
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.btn-outline:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.btn-sm {
+  padding: 0.5rem 1.125rem;
+  font-size: 0.85rem;
+}
+
+.btn-full {
+  width: 100%;
+}
+
+/* ===== Sections ===== */
+.section {
+  padding: 6rem 0;
+}
+
+.section-header {
+  text-align: center;
+  margin-bottom: 3.5rem;
+}
+
+.section-tag {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent-violet);
+  margin-bottom: 0.75rem;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.section-desc {
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin-inline: auto;
+}
+
+/* ===== Products ===== */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+.product-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.05);
+  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.product-card:hover {
+  border-color: var(--border-glow);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-glow);
+}
+
+.product-card--featured {
+  grid-column: 1 / -1;
+}
+
+.size-selector {
+  margin-bottom: 1.25rem;
+}
+
+.size-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.size-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.size-option {
+  padding: 0.45rem 0.875rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.size-option:hover {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+.size-option.active {
+  background: rgba(201, 162, 39, 0.12);
+  border-color: var(--gold);
+  color: var(--gold-dark);
+}
+
+.product-selected-size {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.product-selected-size strong {
+  color: var(--text-primary);
+}
+
+.product-badge {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  padding: 0.25rem 0.75rem;
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.4);
+  border-radius: 100px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--gold-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.product-name {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.02em;
+}
+
+.product-name sub {
+  font-size: 0.72em;
+  font-weight: 600;
+}
+
+.product-desc {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 1.25rem;
+}
+
+.product-specs {
+  margin-bottom: 1.5rem;
+}
+
+.product-specs li {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  padding: 0.3rem 0;
+  padding-left: 1rem;
+  position: relative;
+}
+
+.product-specs li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: var(--accent-cyan);
+}
+
+.product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.product-footer-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.product-card-price {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--gold-dark);
+  letter-spacing: 0.02em;
+}
+
+.product-card-price.hidden {
+  display: none;
+}
+
+.btn-add-cart {
+  margin-left: auto;
+}
+
+.product-price {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+/* ===== Quality ===== */
+.quality {
+  background: var(--bg-elevated);
+  border-block: 1px solid var(--border-subtle);
+}
+
+.quality-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4rem;
+  align-items: center;
+}
+
+.quality-list {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.quality-list li {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.quality-icon {
+  color: var(--accent-cyan);
+  font-size: 1.25rem;
+  margin-top: 0.15rem;
+}
+
+.quality-list strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.quality-list p {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.coa-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.coa-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--gradient-main);
+}
+
+.coa-header {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.coa-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.6rem 0;
+  font-size: 0.9rem;
+}
+
+.coa-row span:first-child {
+  color: var(--text-muted);
+}
+
+.coa-highlight {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+.coa-stamp {
+  position: absolute;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  padding: 0.4rem 1rem;
+  border: 2px solid var(--accent-cyan);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.15em;
+  transform: rotate(-12deg);
+  opacity: 0.7;
+}
+
+/* ===== FAQ ===== */
+.faq-list {
+  max-width: 720px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.faq-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color var(--transition);
+}
+
+.faq-item[open] {
+  border-color: var(--border-glow);
+}
+
+.faq-item summary {
+  padding: 1.25rem 1.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-item summary::after {
+  content: '+';
+  font-size: 1.25rem;
+  color: var(--accent-cyan);
+  transition: transform var(--transition);
+}
+
+.faq-item[open] summary::after {
+  transform: rotate(45deg);
+}
+
+.faq-item p {
+  padding: 0 1.5rem 1.25rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+/* ===== Contact ===== */
+.contact-card {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 3rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 3rem;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.05);
+}
+
+.contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+.contact-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.contact-form input,
+.contact-form textarea {
+  padding: 0.75rem 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition);
+}
+
+.contact-form input:focus,
+.contact-form textarea:focus {
+  outline: none;
+  border-color: var(--accent-cyan);
+}
+
+.contact-form textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+/* ===== Footer ===== */
+.footer {
+  padding: 3rem 0 2rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.footer-inner {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 2rem;
+}
+
+.footer-disclaimer {
+  margin-top: 1rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+  max-width: 52rem;
+}
+
+.footer-disclaimer p {
+  margin-bottom: 0.75rem;
+}
+
+.footer-disclaimer p:last-child {
+  margin-bottom: 0;
+}
+
+.footer-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.footer-links a {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  transition: color var(--transition);
+}
+
+.footer-links a:hover {
+  color: var(--accent-cyan);
+}
+
+.footer-copy {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ===== Cart ===== */
+body.cart-open {
+  overflow: hidden;
+}
+
+.cart-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+}
+
+.cart-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.cart-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(420px, 100vw);
+  height: 100%;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  animation: cart-slide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes cart-slide {
+  from { transform: translateX(100%); }
+}
+
+.cart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cart-title {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.cart-close {
+  width: 36px;
+  height: 36px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.cart-close:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glow);
+}
+
+.cart-items {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.5rem;
+}
+
+.cart-empty {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-secondary);
+}
+
+.cart-empty p {
+  margin-bottom: 1.25rem;
+}
+
+.cart-item {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cart-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.cart-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.cart-item-remove {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.cart-item-remove:hover {
+  color: #e05252;
+  border-color: rgba(224, 82, 82, 0.45);
+  background: rgba(224, 82, 82, 0.08);
+}
+
+.cart-item-name {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.cart-item-size {
+  font-size: 0.85rem;
+  color: var(--accent-cyan);
+}
+
+.cart-item-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qty-btn {
+  width: 28px;
+  height: 28px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+
+.qty-btn:hover {
+  border-color: var(--accent-cyan);
+}
+
+.qty-value {
+  min-width: 24px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.cart-remove {
+  margin-left: auto;
+  background: none;
+  border: none;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition);
+}
+
+.cart-remove:hover {
+  color: #f87171;
+}
+
+.cart-footer {
+  padding: 1.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.cart-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+/* ===== Checkout ===== */
+.checkout-page {
+  padding-top: 7rem;
+  padding-bottom: 4rem;
+}
+
+.checkout-header {
+  margin-bottom: 2rem;
+}
+
+.checkout-bac-reminder {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  background: rgba(201, 162, 39, 0.1);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.35rem;
+  margin-bottom: 2rem;
+}
+
+.checkout-bac-reminder--added {
+  background: rgba(34, 120, 80, 0.08);
+  border-color: rgba(34, 120, 80, 0.28);
+}
+
+.checkout-bac-reminder-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gradient-main);
+  border-radius: var(--radius-sm);
+  color: var(--text-on-accent);
+}
+
+.checkout-bac-reminder-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  margin-bottom: 0.35rem;
+}
+
+.checkout-bac-reminder--added .checkout-bac-reminder-title {
+  color: #1a6b45;
+}
+
+.checkout-bac-reminder-text {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.checkout-bac-reminder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkout-bac-reminder-link {
+  font-size: 0.8rem;
+  color: var(--gold-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  margin-left: 0.25rem;
+}
+
+.checkout-bac-reminder-link:hover {
+  color: var(--gold);
+}
+
+.checkout-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+.checkout-section-title {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  margin-bottom: 1.25rem;
+}
+
+.checkout-form label {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.checkout-form input {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+.checkout-form input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.form-row--3 {
+  grid-template-columns: 1fr 1fr 0.75fr;
+}
+
+.checkout-payment {
+  margin-top: 2.5rem;
+}
+
+.payment-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.payment-tab {
+  flex: 1;
+  min-width: 100px;
+  padding: 0.875rem 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.payment-tab:hover {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+
+.payment-tab.active {
+  background: var(--bg-card);
+  border-color: var(--gold);
+  color: var(--gold-dark);
+}
+
+.payment-tab-icon {
+  margin-right: 0.35rem;
+}
+
+.payment-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.5rem;
+}
+
+.payment-panel-desc {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.6;
+}
+
+.payment-panel-note {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.payment-panel-note code {
+  font-size: 0.75rem;
+  background: var(--bg-elevated);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+}
+
+.checkout-summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 1.5rem;
+  position: sticky;
+  top: 6rem;
+}
+
+.checkout-summary-lines {
+  margin-bottom: 1.25rem;
+}
+
+.checkout-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.9rem;
+}
+
+.checkout-line-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.checkout-line-remove {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.checkout-line-remove:hover {
+  color: #e05252;
+  border-color: rgba(224, 82, 82, 0.45);
+  background: rgba(224, 82, 82, 0.08);
+}
+
+.checkout-line-name {
+  display: block;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.checkout-line-qty {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.checkout-line-price {
+  font-weight: 600;
+  color: var(--gold-dark);
+  white-space: nowrap;
+}
+
+.checkout-totals {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 1rem;
+}
+
+.checkout-total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.checkout-total-row--grand {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.checkout-total-row--grand span:last-child {
+  color: var(--gold-dark);
+}
+
+.checkout-legal {
+  margin-top: 1.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.checkout-legal a {
+  color: var(--gold-dark);
+}
+
+.checkout-empty {
+  text-align: center;
+  padding: 2rem 0;
+  color: var(--text-secondary);
+}
+
+.checkout-empty p {
+  margin-bottom: 1rem;
+}
+
+.checkout-setup-banner {
+  background: rgba(201, 162, 39, 0.12);
+  border: 1px solid rgba(201, 162, 39, 0.35);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.checkout-setup-banner code {
+  font-size: 0.8rem;
+  background: var(--bg-elevated);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+}
+
+.checkout-alert {
+  background: rgba(201, 162, 39, 0.1);
+  border: 1px solid rgba(201, 162, 39, 0.3);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.crypto-order-box {
+  display: grid;
+  gap: 0.5rem;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.95rem;
+}
+
+.crypto-label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-right: 0.5rem;
+}
+
+.crypto-wallets {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.crypto-wallet {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  padding: 0.875rem 1rem;
+}
+
+.crypto-wallet-label {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--gold-dark);
+}
+
+.crypto-wallet-address {
+  font-size: 0.75rem;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+.checkout-success {
+  max-width: 520px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 3rem 0;
+}
+
+.checkout-success-icon {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gradient-main);
+  border-radius: 50%;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-on-accent);
+}
+
+.checkout-success-order {
+  margin: 1.5rem 0 2rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 900px) {
+  .checkout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .checkout-summary-card {
+    position: static;
+  }
+
+  .form-row--3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cart-toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10001;
+  padding: 0.875rem 1.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  animation: toast-in 0.3s ease;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  .nav-links {
+    display: none;
+  }
+
+  .nav-links.open {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    position: absolute;
+    top: 72px;
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    padding: 1.5rem;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .nav-links .cart-btn {
+    align-self: flex-start;
+  }
+
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  .hero-layout {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+
+  .hero-visual-panel {
+    max-width: 100%;
+    min-height: 360px;
+  }
+
+  .art-sequence,
+  .art-helix-band {
+    display: none;
+  }
+
+  .amino-chain--4,
+  .amino-chain--7 {
+    display: none;
+  }
+
+  .amino-chain {
+    opacity: 0.14;
+  }
+
+  .art-hplc {
+    opacity: 0.12;
+  }
+
+  .hero-chromatogram {
+    opacity: 0.18;
+    height: 70px;
+  }
+
+  .quality-grid,
+  .contact-card {
+    grid-template-columns: 1fr;
+  }
+
+  .footer-inner {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .hero-stats {
+    gap: 2rem;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .contact-card {
+    padding: 2rem 1.5rem;
+  }
+
+  .gate-card {
+    padding: 2rem 1.25rem;
+  }
+}
+(function () {
+  var STORAGE_KEY = 'especial_peptides_cart';
+  var cart = [];
+
+  var overlay = document.getElementById('cart-overlay');
+  var backdrop = document.getElementById('cart-backdrop');
+  var toggleBtn = document.getElementById('cart-toggle');
+  var closeBtn = document.getElementById('cart-close');
+  var itemsEl = document.getElementById('cart-items');
+  var countEl = document.getElementById('cart-count');
+  var checkoutBtn = document.getElementById('cart-checkout');
+  var toastEl = document.getElementById('cart-toast');
+
+  function loadCart() {
+    try {
+      var saved = localStorage.getItem(STORAGE_KEY);
+      cart = saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      cart = [];
+    }
+  }
+
+  function saveCart() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
+    } catch (_) {}
+  }
+
+  function slugify(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  }
+
+  function getProductDetails(btn) {
+    var card = btn.closest('.product-card');
+    if (!card) return null;
+
+    var nameEl = card.querySelector('.product-name');
+    var name = nameEl ? nameEl.textContent.trim() : '';
+    var productKey = card.getAttribute('data-product-card') || slugify(name);
+    var selected = card.querySelector('.size-option.active');
+    var fixedSize = btn.getAttribute('data-fixed-size');
+    var fixedUnit = btn.getAttribute('data-fixed-unit') || 'mg';
+    var size = '';
+    var unit = 'mg';
+    var display = name;
+
+    if (selected) {
+      size = selected.getAttribute('data-size');
+      unit = selected.getAttribute('data-unit') || 'mg';
+      display = name + ' — ' + size + unit;
+    } else if (fixedSize) {
+      size = fixedSize;
+      unit = fixedUnit;
+      display = name + ' — ' + size + unit;
+    }
+
+    var id = productKey + (size ? '-' + size + unit : '');
+
+    var price = window.EPPrices ? window.EPPrices.getPrice(id) : 0;
+    return { id: id, name: name, size: size, unit: unit, display: display, quantity: 1, price: price };
+  }
+
+  function addToCart(item) {
+    if (window.EPPrices) {
+      window.EPPrices.enrichItem(item);
+    }
+    var existing = cart.find(function (i) { return i.id === item.id; });
+    if (existing) {
+      existing.quantity += 1;
+    } else {
+      cart.push(item);
+    }
+    saveCart();
+    renderCart();
+    showToast(item.display + ' added to cart');
+  }
+
+  function removeFromCart(id) {
+    cart = cart.filter(function (i) { return i.id !== id; });
+    saveCart();
+    renderCart();
+  }
+
+  function updateQuantity(id, delta) {
+    var item = cart.find(function (i) { return i.id === id; });
+    if (!item) return;
+
+    item.quantity += delta;
+    if (item.quantity <= 0) {
+      removeFromCart(id);
+      return;
+    }
+
+    saveCart();
+    renderCart();
+  }
+
+  function getTotalCount() {
+    return cart.reduce(function (sum, item) { return sum + item.quantity; }, 0);
+  }
+
+  function renderCart() {
+    var total = getTotalCount();
+
+    if (countEl) {
+      countEl.textContent = String(total);
+      countEl.classList.toggle('visible', total > 0);
+    }
+
+    if (!itemsEl) return;
+
+    if (cart.length === 0) {
+      itemsEl.innerHTML =
+        '<div class="cart-empty">' +
+          '<p>Your cart is empty</p>' +
+          '<a href="#products" class="btn btn-ghost btn-sm" id="cart-shop-link">Browse Products</a>' +
+        '</div>';
+      bindShopLink();
+      return;
+    }
+
+    itemsEl.innerHTML = cart.map(function (item) {
+      if (window.EPPrices) window.EPPrices.enrichItem(item);
+      var linePrice = item.price ? '$' + (item.price * item.quantity).toFixed(2) : '';
+      var removeLabel = 'Remove ' + (item.display || item.name) + ' from cart';
+      return (
+        '<div class="cart-item" data-cart-id="' + item.id + '">' +
+          '<div class="cart-item-header">' +
+            '<div class="cart-item-info">' +
+              '<span class="cart-item-name">' + escapeHtml(item.name) + '</span>' +
+              (item.size ? '<span class="cart-item-size">' + escapeHtml(item.size + item.unit) + (linePrice ? ' · ' + linePrice : '') + '</span>' : '') +
+            '</div>' +
+            '<button type="button" class="cart-item-remove" data-cart-id="' + item.id + '" aria-label="' + escapeHtml(removeLabel) + '" title="Remove item">&times;</button>' +
+          '</div>' +
+          '<div class="cart-item-controls">' +
+            '<button type="button" class="qty-btn" data-qty-delta="-1" data-cart-id="' + item.id + '" aria-label="Decrease quantity">−</button>' +
+            '<span class="qty-value">' + item.quantity + '</span>' +
+            '<button type="button" class="qty-btn" data-qty-delta="1" data-cart-id="' + item.id + '" aria-label="Increase quantity">+</button>' +
+            '<button type="button" class="cart-remove" data-cart-id="' + item.id + '" aria-label="' + escapeHtml(removeLabel) + '">Remove</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    itemsEl.querySelectorAll('[data-qty-delta]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        updateQuantity(btn.getAttribute('data-cart-id'), parseInt(btn.getAttribute('data-qty-delta'), 10));
+      });
+    });
+
+    itemsEl.querySelectorAll('.cart-remove, .cart-item-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-cart-id');
+        var removed = cart.find(function (i) { return i.id === id; });
+        removeFromCart(id);
+        if (removed) showToast((removed.display || removed.name) + ' removed');
+      });
+    });
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function bindShopLink() {
+    var link = document.getElementById('cart-shop-link');
+    if (link) {
+      link.addEventListener('click', closeCart);
+    }
+  }
+
+  function openCart() {
+    if (!overlay) return;
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('cart-open');
+  }
+
+  function closeCart() {
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('cart-open');
+  }
+
+  function showToast(message) {
+    if (!toastEl) return;
+    toastEl.textContent = message;
+    toastEl.classList.remove('hidden');
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(function () {
+      toastEl.classList.add('hidden');
+    }, 2500);
+  }
+
+  function checkout() {
+    if (cart.length === 0) {
+      showToast('Your cart is empty');
+      return;
+    }
+
+    cart.forEach(function (item) {
+      if (window.EPPrices) window.EPPrices.enrichItem(item);
+    });
+    saveCart();
+    closeCart();
+    window.location.href = 'checkout.html';
+  }
+
+  document.querySelectorAll('[data-add-cart]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var item = getProductDetails(btn);
+      if (item) addToCart(item);
+    });
+  });
+
+  if (toggleBtn) toggleBtn.addEventListener('click', openCart);
+  if (closeBtn) closeBtn.addEventListener('click', closeCart);
+  if (backdrop) backdrop.addEventListener('click', closeCart);
+  if (checkoutBtn) checkoutBtn.addEventListener('click', checkout);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && overlay && !overlay.classList.contains('hidden')) {
+      closeCart();
+    }
+  });
+
+  loadCart();
+  renderCart();
+})();
+(function () {
+  var STORAGE_KEY = 'especial_peptides_cart';
+  var config = window.EP_PAYMENT_CONFIG || {};
+  var cart = [];
+  var orderId = 'EP-' + Date.now().toString(36).toUpperCase();
+
+  var summaryEl = document.getElementById('checkout-summary');
+  var subtotalEl = document.getElementById('checkout-subtotal');
+  var shippingEl = document.getElementById('checkout-shipping');
+  var totalEl = document.getElementById('checkout-total');
+  var form = document.getElementById('checkout-form');
+  var setupBanner = document.getElementById('payment-setup-banner');
+  var stripeBtn = document.getElementById('stripe-checkout-btn');
+  var bacReminder = document.getElementById('bac-water-reminder');
+  var cryptoPanel = document.getElementById('crypto-panel');
+  var cryptoOrderId = document.getElementById('crypto-order-id');
+  var cryptoAmount = document.getElementById('crypto-amount');
+  var paymentTabs = document.querySelectorAll('[data-payment-tab]');
+  var paymentPanels = document.querySelectorAll('[data-payment-panel]');
+
+  function loadCart() {
+    try {
+      var saved = localStorage.getItem(STORAGE_KEY);
+      cart = saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      cart = [];
+    }
+
+    if (window.EPPrices) {
+      cart = cart.map(function (item) {
+        return window.EPPrices.enrichItem(item);
+      });
+    }
+  }
+
+  function formatMoney(amount) {
+    return '$' + amount.toFixed(2);
+  }
+
+  function getShipping() {
+    return config.shippingFlat || 0;
+  }
+
+  function getSubtotal() {
+    return cart.reduce(function (sum, item) {
+      return sum + (item.price || 0) * item.quantity;
+    }, 0);
+  }
+
+  function getTotal() {
+    return getSubtotal() + getShipping();
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function renderSummary() {
+    if (!summaryEl) return;
+
+    if (cart.length === 0) {
+      summaryEl.innerHTML =
+        '<div class="checkout-empty">' +
+          '<p>Your cart is empty.</p>' +
+          '<a href="index.html#products" class="btn btn-primary">Browse Products</a>' +
+        '</div>';
+      disablePayments('Add items to your cart before checking out.');
+      return;
+    }
+
+    var hasMissingPrice = cart.some(function (item) { return !item.price || item.price <= 0; });
+    if (hasMissingPrice) {
+      disablePayments('Some items are missing prices. Update js/prices.js before accepting payments.');
+    }
+
+    summaryEl.innerHTML = cart.map(function (item) {
+      var lineTotal = (item.price || 0) * item.quantity;
+      var removeLabel = 'Remove ' + (item.display || item.name);
+      return (
+        '<div class="checkout-line" data-cart-id="' + escapeHtml(item.id) + '">' +
+          '<div class="checkout-line-info">' +
+            '<span class="checkout-line-name">' + escapeHtml(item.display || item.name) + '</span>' +
+            '<span class="checkout-line-qty">Qty: ' + item.quantity + '</span>' +
+          '</div>' +
+          '<div class="checkout-line-end">' +
+            '<span class="checkout-line-price">' + (item.price ? formatMoney(lineTotal) : 'TBD') + '</span>' +
+            '<button type="button" class="checkout-line-remove" data-cart-id="' + escapeHtml(item.id) + '" aria-label="' + escapeHtml(removeLabel) + '" title="Remove item">&times;</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    summaryEl.querySelectorAll('.checkout-line-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        removeFromCart(btn.getAttribute('data-cart-id'));
+      });
+    });
+
+    if (subtotalEl) subtotalEl.textContent = formatMoney(getSubtotal());
+    if (shippingEl) shippingEl.textContent = formatMoney(getShipping());
+    if (totalEl) totalEl.textContent = formatMoney(getTotal());
+
+    if (cryptoOrderId) cryptoOrderId.textContent = orderId;
+    if (cryptoAmount) cryptoAmount.textContent = formatMoney(getTotal());
+
+    updateBacReminder();
+  }
+
+  function saveCart() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cart));
+    } catch (_) {}
+  }
+
+  function removeFromCart(id) {
+    cart = cart.filter(function (i) { return i.id !== id; });
+    saveCart();
+    renderSummary();
+    if (stripeBtn && cart.length > 0) {
+      stripeBtn.disabled = false;
+      stripeBtn.textContent = 'Pay with Card';
+    }
+  }
+
+  function hasBacWater() {
+    return cart.some(function (item) {
+      return item.id && item.id.indexOf('bac-water') === 0;
+    });
+  }
+
+  function updateBacReminder() {
+    if (!bacReminder) return;
+
+    if (hasBacWater()) {
+      bacReminder.classList.add('checkout-bac-reminder--added');
+      var title = bacReminder.querySelector('.checkout-bac-reminder-title');
+      var text = bacReminder.querySelector('.checkout-bac-reminder-text');
+      if (title) title.textContent = 'BAC Water in your order';
+      if (text) text.innerHTML = 'You have bacteriostatic water in your cart for peptide reconstitution. Need a different size? Add another bottle below.';
+    } else {
+      bacReminder.classList.remove('checkout-bac-reminder--added');
+      var titleReset = bacReminder.querySelector('.checkout-bac-reminder-title');
+      var textReset = bacReminder.querySelector('.checkout-bac-reminder-text');
+      if (titleReset) titleReset.textContent = "Don't forget BAC Water";
+      if (textReset) {
+        textReset.innerHTML = 'Lyophilized peptides require <strong>bacteriostatic water</strong> for reconstitution in laboratory research. Add a bottle to your order before checkout.';
+      }
+    }
+  }
+
+  function addBacWater(size, unit) {
+    var id = 'bac-water-' + size + unit;
+    var display = 'BAC Water — ' + size + unit;
+    var price = window.EPPrices ? window.EPPrices.getPrice(id) : 0;
+    var existing = cart.find(function (i) { return i.id === id; });
+
+    if (existing) {
+      existing.quantity += 1;
+    } else {
+      cart.push({
+        id: id,
+        name: 'BAC Water',
+        size: String(size),
+        unit: unit,
+        display: display,
+        quantity: 1,
+        price: price
+      });
+    }
+
+    saveCart();
+    renderSummary();
+  }
+
+  function initBacReminder() {
+    var btn3 = document.getElementById('bac-add-3ml');
+    var btn10 = document.getElementById('bac-add-10ml');
+
+    if (window.EPPrices) {
+      var p3 = window.EPPrices.getPrice('bac-water-3ml');
+      var p10 = window.EPPrices.getPrice('bac-water-10ml');
+      if (btn3 && p3) btn3.textContent = 'Add 3ml — ' + formatMoney(p3);
+      if (btn10 && p10) btn10.textContent = 'Add 10ml — ' + formatMoney(p10);
+    }
+
+    if (btn3) {
+      btn3.addEventListener('click', function () {
+        addBacWater(3, 'ml');
+      });
+    }
+    if (btn10) {
+      btn10.addEventListener('click', function () {
+        addBacWater(10, 'ml');
+      });
+    }
+
+    updateBacReminder();
+  }
+
+  function disablePayments(message) {
+    if (setupBanner) {
+      setupBanner.textContent = message;
+      setupBanner.classList.remove('hidden');
+    }
+    if (stripeBtn) stripeBtn.disabled = true;
+  }
+
+  function getCustomerData() {
+    if (!form) return {};
+    var data = new FormData(form);
+    return {
+      name: data.get('name') || '',
+      email: data.get('email') || '',
+      institution: data.get('institution') || '',
+      address: data.get('address') || '',
+      city: data.get('city') || '',
+      state: data.get('state') || '',
+      zip: data.get('zip') || '',
+      country: data.get('country') || 'US'
+    };
+  }
+
+  function validateForm() {
+    if (!form) return false;
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return false;
+    }
+    if (cart.length === 0) {
+      alert('Your cart is empty.');
+      return false;
+    }
+    if (getTotal() <= 0) {
+      alert('Order total must be greater than zero. Check prices in js/prices.js.');
+      return false;
+    }
+    return true;
+  }
+
+  function initTabs() {
+    paymentTabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        var target = tab.getAttribute('data-payment-tab');
+        paymentTabs.forEach(function (t) {
+          t.classList.toggle('active', t === tab);
+          t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+        });
+        paymentPanels.forEach(function (panel) {
+          panel.classList.toggle('hidden', panel.getAttribute('data-payment-panel') !== target);
+        });
+      });
+    });
+  }
+
+  function initStripe() {
+    if (!stripeBtn) return;
+
+    stripeBtn.addEventListener('click', function () {
+      if (!validateForm()) return;
+
+      if (!config.stripeCheckoutEndpoint) {
+        alert('Stripe endpoint is not configured.');
+        return;
+      }
+
+      stripeBtn.disabled = true;
+      stripeBtn.textContent = 'Redirecting…';
+
+      fetch(config.stripeCheckoutEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: cart,
+          customer: getCustomerData(),
+          shipping: getShipping(),
+          orderId: orderId
+        })
+      })
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (result) {
+          if (!result.ok || !result.data.url) {
+            throw new Error(result.data.error || 'Could not start card checkout. Upload api/ to GoDaddy and configure payment-secrets.php.');
+          }
+          window.location.href = result.data.url;
+        })
+        .catch(function (err) {
+          alert(err.message);
+          stripeBtn.disabled = false;
+          stripeBtn.textContent = 'Pay with Card';
+        });
+    });
+  }
+
+  function initCrypto() {
+    if (!cryptoPanel || !config.crypto) return;
+
+    var crypto = config.crypto;
+    var hasWallet = crypto.btc || crypto.eth || crypto.usdc;
+    if (!hasWallet) return;
+
+    var walletsEl = document.getElementById('crypto-wallets');
+    if (!walletsEl) return;
+
+    var wallets = [];
+    if (crypto.btc) wallets.push({ label: 'Bitcoin (BTC)', address: crypto.btc });
+    if (crypto.eth) wallets.push({ label: 'Ethereum (ETH)', address: crypto.eth });
+    if (crypto.usdc) wallets.push({ label: 'USDC (ERC-20)', address: crypto.usdc });
+
+    walletsEl.innerHTML = wallets.map(function (w) {
+      return (
+        '<div class="crypto-wallet">' +
+          '<span class="crypto-wallet-label">' + escapeHtml(w.label) + '</span>' +
+          '<code class="crypto-wallet-address">' + escapeHtml(w.address) + '</code>' +
+          '<button type="button" class="btn btn-ghost btn-sm crypto-copy" data-copy="' + escapeHtml(w.address) + '">Copy</button>' +
+        '</div>'
+      );
+    }).join('');
+
+    walletsEl.querySelectorAll('.crypto-copy').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var text = btn.getAttribute('data-copy');
+        navigator.clipboard.writeText(text).then(function () {
+          btn.textContent = 'Copied!';
+          setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+        });
+      });
+    });
+
+    if (crypto.networkNote) {
+      var note = document.getElementById('crypto-network-note');
+      if (note) note.textContent = crypto.networkNote;
+    }
+  }
+
+  function checkSetup() {
+    var issues = [];
+    if (!config.stripeCheckoutEndpoint) issues.push('Stripe endpoint');
+    if (!config.crypto || (!config.crypto.btc && !config.crypto.eth && !config.crypto.usdc)) {
+      issues.push('Crypto wallet addresses');
+    }
+
+    if (issues.length === 2 && setupBanner) {
+      setupBanner.innerHTML =
+        '<strong>Payment setup required.</strong> Add your merchant keys in <code>js/payment-config.js</code> ' +
+        'and Stripe secrets in <code>api/payment-secrets.php</code> before going live. ' +
+        'See <code>CHECKOUT-SETUP.txt</code> for instructions.';
+      setupBanner.classList.remove('hidden');
+    }
+  }
+
+  loadCart();
+  renderSummary();
+  initBacReminder();
+  initTabs();
+  initStripe();
+  initCrypto();
+  checkSetup();
+
+  if (new URLSearchParams(window.location.search).get('cancelled')) {
+    var cancelled = document.getElementById('checkout-cancelled');
+    if (cancelled) cancelled.classList.remove('hidden');
+  }
+})();
+(function () {
+  var container = document.getElementById('dna-helix-3d');
+  if (!container) return;
+
+  var PAIRS = 40;
+  var RADIUS = 58;
+  var STEP_Y = 8;
+  var DIAMETER = RADIUS * 2;
+  var ANGLE_STEP = 360 / PAIRS;
+  var totalHeight = (PAIRS - 1) * STEP_Y;
+  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var rotate = document.createElement('div');
+  rotate.className = 'dna-rotate';
+  if (prefersReducedMotion) {
+    rotate.classList.add('dna-rotate--static');
+  }
+
+  for (var i = 0; i < PAIRS; i++) {
+    var angle = ANGLE_STEP * i;
+    var y = i * STEP_Y - totalHeight / 2;
+
+    var rung = document.createElement('div');
+    rung.className = 'dna-rung';
+    rung.style.transform = 'rotateY(' + angle + 'deg) translateY(' + y + 'px)';
+
+    var nodeA = document.createElement('span');
+    nodeA.className = 'dna-node dna-node--a';
+
+    var bond = document.createElement('span');
+    bond.className = 'dna-bond';
+
+    var nodeB = document.createElement('span');
+    nodeB.className = 'dna-node dna-node--b';
+
+    rung.appendChild(nodeA);
+    rung.appendChild(bond);
+    rung.appendChild(nodeB);
+    rotate.appendChild(rung);
+
+    if (i < PAIRS - 1) {
+      var linkA = document.createElement('div');
+      linkA.className = 'dna-link dna-link--a';
+      linkA.style.transform =
+        'rotateY(' + angle + 'deg) translateX(-' + RADIUS + 'px) translateY(' + y + 'px)';
+
+      var rodA = document.createElement('span');
+      rodA.className = 'dna-link-rod';
+      linkA.appendChild(rodA);
+      rotate.appendChild(linkA);
+
+      var linkB = document.createElement('div');
+      linkB.className = 'dna-link dna-link--b';
+      linkB.style.transform =
+        'rotateY(' + angle + 'deg) translateX(' + RADIUS + 'px) translateY(' + y + 'px)';
+
+      var rodB = document.createElement('span');
+      rodB.className = 'dna-link-rod';
+      linkB.appendChild(rodB);
+      rotate.appendChild(linkB);
+    }
+  }
+
+  var floor = document.createElement('div');
+  floor.className = 'dna-floor';
+  rotate.appendChild(floor);
+
+  container.appendChild(rotate);
+
+  container.style.setProperty('--dna-radius', RADIUS + 'px');
+  container.style.setProperty('--dna-diameter', DIAMETER + 'px');
+  container.style.setProperty('--dna-step', STEP_Y + 'px');
+})();
+(function () {
+  const STORAGE_KEY = 'especial_peptides_gate_accepted';
+  const overlay = document.getElementById('gate-overlay');
+  const siteContent = document.getElementById('site-content');
+  const form = document.getElementById('gate-form');
+  const checkResearch = document.getElementById('check-research');
+  const checkAge = document.getElementById('check-age');
+  const enterBtn = document.getElementById('gate-enter');
+
+  function bothChecked() {
+    return checkResearch.checked && checkAge.checked;
+  }
+
+  function updateButtonState() {
+    enterBtn.disabled = !bothChecked();
+  }
+
+  function showSite() {
+    overlay.classList.add('dismissed');
+    siteContent.classList.remove('hidden');
+    document.body.classList.remove('gate-active');
+
+    setTimeout(function () {
+      overlay.classList.add('hidden');
+    }, 500);
+  }
+
+  function acceptGate() {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        research: true,
+        age: true,
+        timestamp: Date.now()
+      }));
+    } catch (_) {
+      /* sessionStorage unavailable — gate still works for this visit */
+    }
+    showSite();
+  }
+
+  if (sessionStorage.getItem(STORAGE_KEY)) {
+    showSite();
+    overlay.classList.add('hidden');
+    return;
+  }
+
+  document.body.classList.add('gate-active');
+
+  checkResearch.addEventListener('change', updateButtonState);
+  checkAge.addEventListener('change', updateButtonState);
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!bothChecked()) return;
+    acceptGate();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !overlay.classList.contains('hidden')) {
+      e.preventDefault();
+    }
+  });
+})();
+(function () {
+  const menuBtn = document.querySelector('.mobile-menu-btn');
+  const navLinks = document.querySelector('.nav-links');
+
+  if (menuBtn && navLinks) {
+    menuBtn.addEventListener('click', function () {
+      const isOpen = navLinks.classList.toggle('open');
+      menuBtn.setAttribute('aria-expanded', String(isOpen));
+    });
+
+    navLinks.querySelectorAll('a').forEach(function (link) {
+      link.addEventListener('click', function () {
+        navLinks.classList.remove('open');
+        menuBtn.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+
+  function formatPrice(amount) {
+    return '$' + amount.toFixed(2);
+  }
+
+  function getPriceId(card) {
+    var key = card.getAttribute('data-product-card');
+    if (!key || !window.EPPrices) return null;
+
+    var active = card.querySelector('.size-option.active');
+    if (active) {
+      var unit = active.getAttribute('data-unit') || 'mg';
+      return key + '-' + active.getAttribute('data-size') + unit;
+    }
+
+    var fixedBtn = card.querySelector('[data-fixed-size]');
+    if (fixedBtn) {
+      var fixedUnit = fixedBtn.getAttribute('data-fixed-unit') || 'mg';
+      return key + '-' + fixedBtn.getAttribute('data-fixed-size') + fixedUnit;
+    }
+
+    return null;
+  }
+
+  function ensurePriceMeta(card) {
+    var footer = card.querySelector('.product-footer');
+    if (!footer) return null;
+
+    var meta = footer.querySelector('.product-footer-meta');
+    if (meta) return meta;
+
+    meta = document.createElement('div');
+    meta.className = 'product-footer-meta';
+
+    var sizeSpan = footer.querySelector('.product-selected-size');
+    var fixedSpan = footer.querySelector('.product-price');
+
+    if (sizeSpan) {
+      meta.appendChild(sizeSpan);
+    } else if (fixedSpan) {
+      meta.appendChild(fixedSpan);
+    }
+
+    var priceEl = document.createElement('span');
+    priceEl.className = 'product-card-price';
+    meta.appendChild(priceEl);
+
+    var addBtn = footer.querySelector('[data-add-cart]');
+    footer.insertBefore(meta, addBtn || null);
+
+    return meta;
+  }
+
+  function updateCardPrice(card) {
+    if (!card) return;
+    var meta = ensurePriceMeta(card);
+    if (!meta) return;
+
+    var priceEl = meta.querySelector('.product-card-price');
+    if (!priceEl) return;
+
+    var id = getPriceId(card);
+    var price = id ? window.EPPrices.getPrice(id) : 0;
+
+    if (price > 0) {
+      priceEl.textContent = formatPrice(price);
+      priceEl.classList.remove('hidden');
+    } else {
+      priceEl.textContent = '';
+      priceEl.classList.add('hidden');
+    }
+  }
+
+  document.querySelectorAll('[data-product-card]').forEach(function (card) {
+    updateCardPrice(card);
+  });
+
+  document.querySelectorAll('.size-option').forEach(function (option) {
+    option.addEventListener('click', function () {
+      var card = option.closest('[data-product-card]');
+      if (!card) return;
+
+      card.querySelectorAll('.size-option').forEach(function (opt) {
+        opt.classList.remove('active');
+        opt.setAttribute('aria-checked', 'false');
+      });
+
+      option.classList.add('active');
+      option.setAttribute('aria-checked', 'true');
+
+      var sizeLabel = card.querySelector('.product-selected-size strong');
+      var unit = option.getAttribute('data-unit') || 'mg';
+      if (sizeLabel) sizeLabel.textContent = option.getAttribute('data-size') + unit;
+
+      updateCardPrice(card);
+    });
+  });
+
+  var contactForm = document.getElementById('contact-form');
+  if (contactForm) {
+    contactForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      alert('Thank you for your inquiry. We will respond within 24 hours.');
+      contactForm.reset();
+    });
+  }
+})();
+/**
+ * Payment configuration — add your merchant keys before going live.
+ * See CHECKOUT-SETUP.txt in the site root for step-by-step instructions.
+ */
+window.EP_PAYMENT_CONFIG = {
+  currency: 'USD',
+  shippingFlat: 12.95,
+
+  /* Stripe: https://dashboard.stripe.com/apikeys */
+  stripePublishableKey: '',
+  stripeCheckoutEndpoint: 'api/stripe-checkout.php',
+
+  /* Cryptocurrency wallet addresses (leave blank to hide that option) */
+  crypto: {
+    btc: '',
+    eth: '',
+    usdc: '',
+    networkNote: 'USDC: ERC-20 (Ethereum network). Always include your order number in the memo/note field.'
+  },
+
+  supportEmail: 'support@especialpeptides.com'
+};
+/**
+ * Product pricing — update these amounts to match your catalog.
+ * Prices are in USD per item (one vial).
+ */
+(function () {
+  var CATALOG = {
+    'retatrutide-10mg': 87, 'retatrutide-15mg': 112,
+    'retatrutide-20mg': 142, 'retatrutide-30mg': 202,
+    'retatrutide-60mg': 350, 'retatrutide-100mg': 575,
+
+    'tirzepatide-10mg': 85, 'tirzepatide-15mg': 110,
+    'tirzepatide-20mg': 140, 'tirzepatide-30mg': 200,
+    'tirzepatide-60mg': 300, 'tirzepatide-100mg': 400,
+
+    'bpc-157-5mg': 32, 'bpc-157-10mg': 45,
+
+    'epithalon-10mg': 28,
+
+    'kisspeptin-10mg': 40,
+
+    'selank-10mg': 45,
+
+    'semax-10mg': 45,
+
+    '5-amino-1mq-50mg': 65,
+
+    'bac-water-3ml': 10, 'bac-water-10ml': 15,
+
+    'tb-500-10mg': 65,
+
+    'ghk-cu-100mg': 45,
+
+    'ahk-cu-100mg': 45,
+
+    'melanotan-1-10mg': 40,
+
+    'melanotan-2-10mg': 32,
+
+    'ipamorelin-10mg': 55,
+
+    'ghrp-6-10mg': 33,
+
+    'cjc-1295-no-dac-5mg': 35,
+
+    'cjc-1295-dac-5mg': 60,
+
+    'ipamorelin-cjc-blend-10mg': 60,
+
+    'tesamorelin-10mg': 70,
+
+    'bpc-tb-blend-10mg': 50,
+
+    'bpc-tb-blend-20-20mg': 80,
+
+    'glow-blend-70mg': 105,
+
+    'klow-blend-80mg': 130,
+
+    'nad-plus-500mg': 55, 'nad-plus-1000mg': 87
+  };
+
+  window.EPPrices = {
+    getPrice: function (id) {
+      return CATALOG[id] != null ? CATALOG[id] : 0;
+    },
+
+    enrichItem: function (item) {
+      if (item.price == null || item.price === 0) {
+        item.price = this.getPrice(item.id);
+      }
+      return item;
+    }
+  };
+})();
+# Never commit live payment secrets
+api/payment-secrets.php
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Archives
+*.zip
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Checkout — Especial Peptides">
+  <title>Checkout — Especial Peptides</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="site-content">
+    <header class="header">
+      <nav class="nav container">
+        <a href="index.html" class="logo logo--image">
+          <img src="photos/especial-peptides-logo.png" alt="Especial Peptides" class="logo-img">
+        </a>
+        <ul class="nav-links">
+          <li><a href="index.html#products">Products</a></li>
+          <li><a href="index.html">← Back to Shop</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main>
+      <section class="checkout-page section section--art">
+        <div class="container">
+          <div class="checkout-header">
+            <span class="section-tag">Secure Checkout</span>
+            <h1 class="section-title">Complete Your Order</h1>
+            <p class="section-desc">For laboratory research use only. All sales subject to our Terms &amp; Conditions.</p>
+          </div>
+
+          <div id="checkout-cancelled" class="checkout-alert hidden" role="status">
+            Payment was cancelled. Your cart is still saved — choose a payment method below to try again.
+          </div>
+
+          <div id="payment-setup-banner" class="checkout-setup-banner hidden" role="note"></div>
+
+          <div class="checkout-grid">
+            <div class="checkout-main">
+              <aside id="bac-water-reminder" class="checkout-bac-reminder" aria-label="BAC Water reminder">
+                <div class="checkout-bac-reminder-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+                    <path d="M12 2v4M8 6h8M10 10h4v12H10V10z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </div>
+                <div class="checkout-bac-reminder-body">
+                  <h3 class="checkout-bac-reminder-title">Don&rsquo;t forget BAC Water</h3>
+                  <p class="checkout-bac-reminder-text">Lyophilized peptides require <strong>bacteriostatic water</strong> for reconstitution in laboratory research. Add a bottle to your order before checkout.</p>
+                  <div class="checkout-bac-reminder-actions">
+                    <button type="button" class="btn btn-sm btn-primary" id="bac-add-3ml">Add 3ml</button>
+                    <button type="button" class="btn btn-sm btn-ghost" id="bac-add-10ml">Add 10ml</button>
+                    <a href="index.html#products" class="checkout-bac-reminder-link">View in catalog</a>
+                  </div>
+                </div>
+              </aside>
+
+              <form id="checkout-form" class="checkout-form" novalidate>
+                <h2 class="checkout-section-title">Contact &amp; Shipping</h2>
+                <div class="form-row">
+                  <label>
+                    Full Name
+                    <input type="text" name="name" required placeholder="Dr. Jane Smith" autocomplete="name">
+                  </label>
+                  <label>
+                    Institution / Lab
+                    <input type="text" name="institution" placeholder="Research University" autocomplete="organization">
+                  </label>
+                </div>
+                <label>
+                  Email
+                  <input type="email" name="email" required placeholder="you@lab.edu" autocomplete="email">
+                </label>
+                <label>
+                  Street Address
+                  <input type="text" name="address" required placeholder="123 Research Blvd" autocomplete="street-address">
+                </label>
+                <div class="form-row form-row--3">
+                  <label>
+                    City
+                    <input type="text" name="city" required autocomplete="address-level2">
+                  </label>
+                  <label>
+                    State
+                    <input type="text" name="state" required autocomplete="address-level1">
+                  </label>
+                  <label>
+                    ZIP
+                    <input type="text" name="zip" required autocomplete="postal-code">
+                  </label>
+                </div>
+                <label>
+                  Country
+                  <input type="text" name="country" value="US" required autocomplete="country-name">
+                </label>
+              </form>
+
+              <div class="checkout-payment">
+                <h2 class="checkout-section-title">Payment Method</h2>
+                <div class="payment-tabs" role="tablist">
+                  <button type="button" class="payment-tab active" data-payment-tab="card" role="tab" aria-selected="true">
+                    <span class="payment-tab-icon">💳</span> Credit Card
+                  </button>
+                  <button type="button" class="payment-tab" data-payment-tab="crypto" role="tab" aria-selected="false">
+                    <span class="payment-tab-icon">₿</span> Crypto
+                  </button>
+                </div>
+
+                <div class="payment-panel" data-payment-panel="card">
+                  <p class="payment-panel-desc">Pay securely with Visa, Mastercard, American Express, or Discover via Stripe.</p>
+                  <button type="button" class="btn btn-primary btn-full" id="stripe-checkout-btn">Pay with Card</button>
+                  <p class="payment-panel-note">You will be redirected to our secure Stripe checkout page.</p>
+                </div>
+
+                <div class="payment-panel hidden" data-payment-panel="crypto" id="crypto-panel">
+                  <p class="payment-panel-desc">Send the exact USD equivalent in cryptocurrency. Include your order number in the transaction memo.</p>
+                  <div class="crypto-order-box">
+                    <div><span class="crypto-label">Order #</span> <strong id="crypto-order-id">—</strong></div>
+                    <div><span class="crypto-label">Amount due</span> <strong id="crypto-amount">—</strong></div>
+                  </div>
+                  <div id="crypto-wallets" class="crypto-wallets"></div>
+                  <p class="payment-panel-note" id="crypto-network-note"></p>
+                  <p class="payment-panel-note">After payment, email <a href="mailto:support@especialpeptides.com">support@especialpeptides.com</a> with your order number and transaction hash.</p>
+                </div>
+              </div>
+            </div>
+
+            <aside class="checkout-sidebar">
+              <div class="checkout-summary-card">
+                <h2 class="checkout-section-title">Order Summary</h2>
+                <div id="checkout-summary" class="checkout-summary-lines"></div>
+                <div class="checkout-totals">
+                  <div class="checkout-total-row">
+                    <span>Subtotal</span>
+                    <span id="checkout-subtotal">$0.00</span>
+                  </div>
+                  <div class="checkout-total-row">
+                    <span>Shipping</span>
+                    <span id="checkout-shipping">$0.00</span>
+                  </div>
+                  <div class="checkout-total-row checkout-total-row--grand">
+                    <span>Total</span>
+                    <span id="checkout-total">$0.00</span>
+                  </div>
+                </div>
+                <p class="checkout-legal">By completing checkout you agree to our <a href="terms.html">Terms &amp; Conditions</a> and confirm products are for research use only.</p>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <div class="footer-brand">
+          <a href="index.html" class="logo logo--image">
+            <img src="photos/especial-peptides-logo.png" alt="Especial Peptides" class="logo-img">
+          </a>
+        </div>
+        <div class="footer-links">
+          <a href="terms.html">Terms &amp; Conditions</a>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="shipping.html">Shipping Policy</a>
+        </div>
+        <p class="footer-copy">&copy; 2026 Especial Peptides. All rights reserved.</p>
+      </div>
+    </footer>
+  </div>
+
+  <script src="js/payment-config.js"></script>
+  <script src="js/prices.js"></script>
+  <script src="js/checkout.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
+ESPECIAL PEPTIDES — CHECKOUT SETUP
+==================================
+
+Your site supports credit card and cryptocurrency payments. Before going live, complete these steps:
+
+1. UPDATE PRICES
+   Edit js/prices.js with your actual product prices.
+
+2. CREDIT CARD (STRIPE)
+   - Create a Stripe account: https://dashboard.stripe.com
+   - Copy your Publishable Key into js/payment-config.js → stripePublishableKey
+   - Copy api/payment-secrets.example.php to api/payment-secrets.php
+   - Add your Stripe Secret Key (sk_live_...) to payment-secrets.php
+   - Upload the api/ folder to GoDaddy (PHP must be enabled — standard on GoDaddy hosting)
+
+3. CRYPTOCURRENCY
+   - Add your wallet addresses in js/payment-config.js → crypto
+   - Customers send payment manually and email you the transaction hash
+
+4. UPLOAD TO GODADDY
+   Upload these folders/files along with your site:
+   - checkout.html, checkout-success.html
+   - js/payment-config.js, js/prices.js, js/checkout.js
+   - api/stripe-checkout.php
+   - api/payment-secrets.php (keep this private — never share your secret key)
+
+TESTING
+- Stripe: use sk_test_ and pk_test_ keys first
+- Crypto: test with a small amount before accepting large orders
+
+SUPPORT: support@especialpeptides.com
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Confirmed — Especial Peptides</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="site-content">
+    <header class="header">
+      <nav class="nav container">
+        <a href="index.html" class="logo logo--image">
+          <img src="photos/especial-peptides-logo.png" alt="Especial Peptides" class="logo-img">
+        </a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="checkout-page section section--art">
+        <div class="container">
+          <div class="checkout-success">
+            <div class="checkout-success-icon" aria-hidden="true">✓</div>
+            <h1 class="section-title">Thank You</h1>
+            <p class="section-desc">Your payment has been received. A confirmation will be sent to your email.</p>
+            <p class="checkout-success-order">Order reference: <strong id="success-order-id">—</strong></p>
+            <a href="index.html" class="btn btn-primary">Return to Shop</a>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var order = params.get('order') || '—';
+      var el = document.getElementById('success-order-id');
+      if (el) el.textContent = order;
+      try { localStorage.removeItem('especial_peptides_cart'); } catch (_) {}
+    })();
+  </script>
+</body>
+</html>
+ESPECIAL PEPTIDES — GITHUB REPOSITORY SETUP
+============================================
+
+This folder contains the complete website and is ready to push to GitHub.
+
+FOLDER STRUCTURE
+----------------
+especial-peptides-github/
+  index.html              Main storefront
+  checkout.html           Checkout page
+  checkout-success.html   Order confirmation
+  terms.html              Terms & Conditions
+  privacy.html            Privacy Policy
+  shipping.html           Shipping & Returns
+  css/styles.css          All styling
+  js/                     Cart, checkout, prices, DNA animation, age gate
+  photos/                 Logo image
+  api/                    Stripe checkout (PHP — needs server with PHP)
+  CHECKOUT-SETUP.txt      Payment configuration guide
+  .gitignore              Keeps secrets out of the repo
+
+STEP 1 — CREATE A GITHUB REPOSITORY
+------------------------------------
+1. Sign in at https://github.com
+2. Click the + icon → New repository
+3. Name it (e.g. especial-peptides)
+4. Leave it Public or Private (your choice)
+5. Do NOT add README, .gitignore, or license (this folder already has them)
+6. Click Create repository
+
+STEP 2A — UPLOAD WITHOUT GIT (EASIEST)
+---------------------------------------
+Git is not required. Use the GitHub website:
+
+1. Create an empty repo on GitHub (see Step 1)
+2. On the repo page, click "uploading an existing file"
+3. Open this folder in File Explorer:
+     C:\Users\Krist\Documents\especial-peptides-github
+4. Select ALL files and folders inside (api, css, js, photos, and all .html files)
+5. Drag them into the GitHub upload area
+6. Scroll down → Commit changes
+
+Or unzip C:\Users\Krist\Documents\especial-peptides-github.zip and upload those contents.
+
+STEP 2B — PUSH WITH GIT (IF INSTALLED)
+---------------------------------------
+Install Git from https://git-scm.com/download/win if needed, then run:
+
+  cd C:\Users\Krist\Documents\especial-peptides-github
+  git init
+  git add .
+  git commit -m "Initial commit: Especial Peptides website"
+  git branch -M main
+  git remote add origin https://github.com/YOUR_USERNAME/especial-peptides.git
+  git push -u origin main
+
+Replace YOUR_USERNAME and the repo name with yours.
+
+STEP 3 — HOST WITH GITHUB PAGES (OPTIONAL)
+-------------------------------------------
+GitHub Pages serves static files only (HTML, CSS, JS, images).
+PHP checkout will NOT run on GitHub Pages.
+
+To enable GitHub Pages:
+1. On GitHub: repo → Settings → Pages
+2. Source: Deploy from branch → main → / (root) → Save
+3. Your site will be at: https://YOUR_USERNAME.github.io/especial-peptides/
+
+For full checkout (Stripe PHP), host on GoDaddy cPanel or similar instead.
+
+STEP 4 — BEFORE GOING LIVE
+---------------------------
+See CHECKOUT-SETUP.txt for Stripe and crypto configuration.
+
+Never commit api/payment-secrets.php — only payment-secrets.example.php is in the repo.
